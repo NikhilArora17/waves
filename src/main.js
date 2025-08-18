@@ -5,8 +5,10 @@ const noise = new Noise();
 
 let scene, camera, renderer;
 const lines = [];
-let lineCount = 30;
-let segmentCount = 170;
+let lineCount = 25;
+
+// instead of segmentCount, we use dotSpacing
+let dotSpacing = 7; // gap between dots in px
 
 let width = window.innerWidth;
 let height = window.innerHeight;
@@ -51,7 +53,7 @@ function init() {
 
   for (let i = 0; i < lineCount; i++) {
     const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(segmentCount * 3);
+    const positions = new Float32Array(3); // placeholder, real size set each frame
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const points = new THREE.Points(geometry, material.clone());
     points.userData.index = i;
@@ -70,7 +72,7 @@ function createCircleTexture() {
 
   ctx.beginPath();
   ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = '#000000';
   ctx.fill();
 
   const texture = new THREE.CanvasTexture(canvas);
@@ -102,9 +104,6 @@ function animate(time) {
   renderer.clearColor();
 
   lines.forEach((points, lineIndex) => {
-    const geometry = points.geometry;
-    const positions = geometry.attributes.position.array;
-
     const baseY = 0;
     const amplitude = 150 + lineIndex * 30;
 
@@ -123,9 +122,24 @@ function animate(time) {
     }
 
     const curve = new THREE.CatmullRomCurve3([p0, ...midPoints, p4]);
-    const curvePoints = curve.getPoints(segmentCount - 1);
 
-    for (let j = 0; j < segmentCount; j++) {
+    // calculate number of dots based on curve length and spacing
+    const curveLength = curve.getLength();
+    const pointCount = Math.floor(curveLength / dotSpacing);
+
+    const curvePoints = curve.getSpacedPoints(pointCount);
+
+    // resize buffer if needed
+    if (points.geometry.attributes.position.count !== curvePoints.length) {
+      points.geometry.setAttribute(
+        'position',
+        new THREE.BufferAttribute(new Float32Array(curvePoints.length * 3), 3)
+      );
+    }
+
+    const positions = points.geometry.attributes.position.array;
+
+    for (let j = 0; j < curvePoints.length; j++) {
       const p = curvePoints[j];
       const idx = j * 3;
       positions[idx] = p.x;
@@ -133,9 +147,9 @@ function animate(time) {
       positions[idx + 2] = 0;
     }
 
-    geometry.attributes.position.needsUpdate = true;
+    points.geometry.attributes.position.needsUpdate = true;
 
-    const centerIndex = Math.floor(segmentCount / 2);
+    const centerIndex = Math.floor(curvePoints.length / 2);
     const cx = curvePoints[centerIndex].x;
     const distToCenter = Math.abs(cx);
     const fade = 1.0 - Math.min(distToCenter / maxDist, 1);
