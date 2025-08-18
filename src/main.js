@@ -5,14 +5,14 @@ const noise = new Noise();
 
 let scene, camera, renderer;
 const lines = [];
-let lineCount = 50;
-let segmentCount = 150;
+let lineCount = 30;
+let segmentCount = 130;
 
 let width = window.innerWidth;
 let height = window.innerHeight;
 
-let sharedLeftX = -width / 1.5;
-let sharedRightX = width / 1.5;
+let sharedLeftX = -width / 1.3;
+let sharedRightX = width / 1.3;
 let maxDist = width / 0.5;
 
 init();
@@ -38,8 +38,8 @@ function init() {
   renderer.setClearColor(0xffffff, 0.05);
 
   const material = new THREE.PointsMaterial({
-    color: 0x6C6F7C,
-    size: 2.1,
+    color: 0x000000,
+    size: 1.8,
     sizeAttenuation: true,
     transparent: true,
     opacity: 0.4,
