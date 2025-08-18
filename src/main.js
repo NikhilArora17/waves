@@ -6,7 +6,7 @@ const noise = new Noise();
 let scene, camera, renderer;
 const lines = [];
 let lineCount = 30;
-let segmentCount = 130;
+let segmentCount = 170;
 
 let width = window.innerWidth;
 let height = window.innerHeight;
