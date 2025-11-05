@@ -33,11 +33,13 @@ function init() {
   renderer = new THREE.WebGLRenderer({
     canvas: document.getElementById('canvas'),
     antialias: true,
-    alpha: true
+    alpha: true,
+    powerPreference: 'high-performance'
   });
+
   renderer.setSize(width, height);
-  renderer.autoClearColor = false;
-  renderer.setClearColor(0xffffff, 0.05);
+  // Do NOT set renderer.autoClearColor = false; Safari-safe defaults
+  renderer.setClearColor(0xffffff, 0.05); // subtle white
 
   const material = new THREE.PointsMaterial({
     color: 0x000000,
@@ -61,7 +63,7 @@ function init() {
     scene.add(points);
   }
 
-  window.addEventListener('resize', onWindowResize);
+  window.addEventListener('resize', onWindowResize, { passive: true });
 }
 
 function createCircleTexture() {
@@ -101,7 +103,7 @@ function animate(time) {
   requestAnimationFrame(animate);
   const t = time * 0.00032;
 
-  renderer.clearColor();
+  // Removed renderer.clearColor(); <-- this crashes on Safari
 
   lines.forEach((points, lineIndex) => {
     const baseY = 0;
@@ -116,8 +118,8 @@ function animate(time) {
 
     const midPoints = [];
     for (let j = 0; j < 3; j++) {
-      let x = sharedLeftX + ((j + 1) / 4) * (sharedRightX - sharedLeftX) + horizontalJitter;
-      let y = baseY + verticalOffset + noise.perlin2(j * (0.4 + lineIndex * 0.05), t + lineIndex * 0.07) * amplitude;
+      const x = sharedLeftX + ((j + 1) / 4) * (sharedRightX - sharedLeftX) + horizontalJitter;
+      const y = baseY + verticalOffset + noise.perlin2(j * (0.4 + lineIndex * 0.05), t + lineIndex * 0.07) * amplitude;
       midPoints.push(new THREE.Vector3(x, y, 0));
     }
 
@@ -125,7 +127,7 @@ function animate(time) {
 
     // calculate number of dots based on curve length and spacing
     const curveLength = curve.getLength();
-    const pointCount = Math.floor(curveLength / dotSpacing);
+    const pointCount = Math.max(2, Math.floor(curveLength / dotSpacing));
 
     const curvePoints = curve.getSpacedPoints(pointCount);
 
