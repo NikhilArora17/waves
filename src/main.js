@@ -159,4 +159,3 @@ function animate(time) {
 
   renderer.render(scene, camera);
 }
-
