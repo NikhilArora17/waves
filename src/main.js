@@ -3,24 +3,26 @@ import { Noise } from 'noisejs';
 
 const noise = new Noise();
 
+const lineCount = 25;
+const dotSpacing = 7;
+
 let scene, camera, renderer;
 const lines = [];
-let lineCount = 25;
 
-// instead of segmentCount, we use dotSpacing
-let dotSpacing = 7; // gap between dots in px
-
-let width = window.innerWidth;
-let height = window.innerHeight;
-
-let sharedLeftX = -width / 1.3;
-let sharedRightX = width / 1.3;
-let maxDist = width / 0.5;
+let width, height;
+let sharedLeftX, sharedRightX, maxDist;
 
 init();
 animate();
 
 function init() {
+  width = window.innerWidth;
+  height = window.innerHeight;
+
+  sharedLeftX = -width / 1.3;
+  sharedRightX = width / 1.3;
+  maxDist = width / 0.5;
+
   scene = new THREE.Scene();
 
   camera = new THREE.OrthographicCamera(
@@ -30,8 +32,14 @@ function init() {
   );
   camera.position.z = 1;
 
+  const canvas = document.getElementById('canvas');
+  if (!canvas) {
+    console.error('Canvas element not found!');
+    return;
+  }
+
   renderer = new THREE.WebGLRenderer({
-    canvas: document.getElementById('canvas'),
+    canvas,
     antialias: true,
     alpha: true
   });
@@ -53,15 +61,14 @@ function init() {
 
   for (let i = 0; i < lineCount; i++) {
     const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(3); // placeholder, real size set each frame
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3), 3));
     const points = new THREE.Points(geometry, material.clone());
     points.userData.index = i;
     lines.push(points);
     scene.add(points);
   }
 
-  window.addEventListener('resize', onWindowResize);
+  window.addEventListener('resize', debounce(onWindowResize, 100));
 }
 
 function createCircleTexture() {
@@ -101,12 +108,11 @@ function animate(time) {
   requestAnimationFrame(animate);
   const t = time * 0.00032;
 
-  //renderer.clearColor();
+  renderer.clearColor();
 
   lines.forEach((points, lineIndex) => {
     const baseY = 0;
     const amplitude = 150 + lineIndex * 30;
-
     const phaseShift = lineIndex * 0.2;
     const verticalOffset = Math.sin(t * 2 + phaseShift) * 12;
     const horizontalJitter = Math.sin(t * 1.5 + phaseShift) * 5;
@@ -116,20 +122,16 @@ function animate(time) {
 
     const midPoints = [];
     for (let j = 0; j < 3; j++) {
-      let x = sharedLeftX + ((j + 1) / 4) * (sharedRightX - sharedLeftX) + horizontalJitter;
-      let y = baseY + verticalOffset + noise.perlin2(j * (0.4 + lineIndex * 0.05), t + lineIndex * 0.07) * amplitude;
+      const x = sharedLeftX + ((j + 1) / 4) * (sharedRightX - sharedLeftX) + horizontalJitter;
+      const y = baseY + verticalOffset + noise.perlin2(j * (0.4 + lineIndex * 0.05), t + lineIndex * 0.07) * amplitude;
       midPoints.push(new THREE.Vector3(x, y, 0));
     }
 
     const curve = new THREE.CatmullRomCurve3([p0, ...midPoints, p4]);
-
-    // calculate number of dots based on curve length and spacing
     const curveLength = curve.getLength();
-    const pointCount = Math.floor(curveLength / dotSpacing);
-
+    const pointCount = Math.max(2, Math.floor(curveLength / dotSpacing)); // ensure minimum 2 points
     const curvePoints = curve.getSpacedPoints(pointCount);
 
-    // resize buffer if needed
     if (points.geometry.attributes.position.count !== curvePoints.length) {
       points.geometry.setAttribute(
         'position',
@@ -138,7 +140,6 @@ function animate(time) {
     }
 
     const positions = points.geometry.attributes.position.array;
-
     for (let j = 0; j < curvePoints.length; j++) {
       const p = curvePoints[j];
       const idx = j * 3;
@@ -160,7 +161,7 @@ function animate(time) {
   renderer.render(scene, camera);
 }
 
-// tiny debounce helper (iOS fires many resize events)
+// Debounce helper
 function debounce(fn, ms = 100) {
   let t;
   return (...args) => {
