@@ -1,4 +1,3 @@
-/* Page reset */
 html, body {
   margin: 0;
   padding: 0;
@@ -8,16 +7,12 @@ html, body {
   overflow: hidden;
 }
 
-/* Make the canvas exactly the viewport size, even on iOS after rotate */
 #canvas {
   display: block;
   width: 100vw;
-
-  /* Fallback → legacy → modern order */
-  height: 100vh;   /* fallback */
-  height: 100svh;  /* iOS 15+ small viewport, avoids address bar jumps */
-  height: 100dvh;  /* modern “dynamic” viewport */
-  
-  touch-action: none;              /* avoid accidental scroll/zoom */
+  height: 100vh;  /* fallback */
+  height: 100svh; /* iOS small viewport */
+  height: 100dvh; /* dynamic viewport */
+  touch-action: none;
   -webkit-tap-highlight-color: transparent;
 }
