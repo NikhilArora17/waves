@@ -1,5 +1,3 @@
-
- 
 import * as THREE from 'three';
 import { Noise } from 'noisejs';
 
@@ -19,6 +17,66 @@ let sharedLeftX = -width / 1.3;
 let sharedRightX = width / 1.3;
 let maxDist = width / 0.5;
 
+// === debounce + stable-viewport helpers ===
+let resizeTimer = null;
+let lastAppliedW = 0;
+let lastAppliedH = 0;
+
+function getViewportSize() {
+  // Prefer VisualViewport when available (more accurate on mobile rotation)
+  const vv = window.visualViewport;
+  if (vv) return { w: Math.floor(vv.width), h: Math.floor(vv.height) };
+  return { w: Math.floor(window.innerWidth), h: Math.floor(window.innerHeight) };
+}
+
+function scheduleResize(reason = 'generic') {
+  // Wait a bit for orientation/viewport to settle (common on iOS)
+  if (resizeTimer) clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    const { w, h } = getViewportSize();
+
+    // guard against transient 0 values during rotation
+    if (!w || !h) {
+      // try again shortly until non-zero
+      scheduleResize('retry-nonzero');
+      return;
+    }
+
+    // avoid redundant work
+    if (w === lastAppliedW && h === lastAppliedH) return;
+
+    performResize(w, h);
+  }, reason === 'orientation' ? 250 : 120); // slightly longer after orientation changes
+}
+
+function performResize(newW, newH) {
+  lastAppliedW = newW;
+  lastAppliedH = newH;
+
+  width = newW;
+  height = newH;
+
+  // endpoints re-derived from new width
+  sharedLeftX = -width / 1.5;   // a touch tighter on resize to keep centered feel
+  sharedRightX = width / 1.5;
+  maxDist = width / 0.5;
+
+  // update camera frustum to match new viewport
+  camera.left = -width / 2;
+  camera.right = width / 2;
+  camera.top = height / 2;
+  camera.bottom = -height / 2;
+  camera.updateProjectionMatrix();
+
+  // clamp DPR to keep performance/stability on iPad
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.75);
+  renderer.setPixelRatio(dpr);
+  renderer.setSize(width, height, false); // no CSS resize here
+
+  // If your canvas is styled via CSS to fill container, ensure container updates too
+  // (Most setups already have canvas width/height:100%)
+}
+
 init();
 animate();
 
@@ -37,9 +95,12 @@ function init() {
     antialias: true,
     alpha: true
   });
+
+  // initial DPR clamp for mobile
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
   renderer.setSize(width, height);
-  renderer.autoClearColor = false;
   renderer.setClearColor(0xffffff, 0.05);
+  renderer.autoClear = true;
 
   const material = new THREE.PointsMaterial({
     color: 0x000000,
@@ -63,7 +124,24 @@ function init() {
     scene.add(points);
   }
 
-  window.addEventListener('resize', onWindowResize);
+  // --- listeners for rotation & resize ---
+  window.addEventListener('resize', () => scheduleResize('resize'));
+  window.addEventListener('orientationchange', () => scheduleResize('orientation'));
+
+  // VisualViewport (iOS Safari / mobile) — fires during rotation & UI chrome changes
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => scheduleResize('vv-resize'));
+  }
+
+  // As a safety, observe canvas size changes (if wrapped in responsive container)
+  const canvas = renderer.domElement;
+  if ('ResizeObserver' in window) {
+    const ro = new ResizeObserver(() => scheduleResize('observer'));
+    ro.observe(canvas);
+  }
+
+  // Apply an initial stable size
+  scheduleResize('init');
 }
 
 function createCircleTexture() {
@@ -82,28 +160,11 @@ function createCircleTexture() {
   return texture;
 }
 
-function onWindowResize() {
-  width = window.innerWidth;
-  height = window.innerHeight;
-
-  sharedLeftX = -width / 1.5;
-  sharedRightX = width / 1.5;
-  maxDist = width / 0.5;
-
-  camera.left = -width / 2;
-  camera.right = width / 2;
-  camera.top = height / 2;
-  camera.bottom = -height / 2;
-  camera.updateProjectionMatrix();
-
-  renderer.setSize(width, height);
-}
-
 function animate(time) {
   requestAnimationFrame(animate);
   const t = time * 0.00032;
 
-  renderer.clearColor();
+  // renderer.clear() is implicit when autoClear=true; keep clearColor set in init
 
   lines.forEach((points, lineIndex) => {
     const baseY = 0;
@@ -118,8 +179,8 @@ function animate(time) {
 
     const midPoints = [];
     for (let j = 0; j < 3; j++) {
-      let x = sharedLeftX + ((j + 1) / 4) * (sharedRightX - sharedLeftX) + horizontalJitter;
-      let y = baseY + verticalOffset + noise.perlin2(j * (0.4 + lineIndex * 0.05), t + lineIndex * 0.07) * amplitude;
+      const x = sharedLeftX + ((j + 1) / 4) * (sharedRightX - sharedLeftX) + horizontalJitter;
+      const y = baseY + verticalOffset + noise.perlin2(j * (0.4 + lineIndex * 0.05), t + lineIndex * 0.07) * amplitude;
       midPoints.push(new THREE.Vector3(x, y, 0));
     }
 
@@ -127,21 +188,22 @@ function animate(time) {
 
     // calculate number of dots based on curve length and spacing
     const curveLength = curve.getLength();
-    const pointCount = Math.floor(curveLength / dotSpacing);
+    const pointCount = Math.max(2, Math.floor(curveLength / dotSpacing)); // guard against 0
 
     const curvePoints = curve.getSpacedPoints(pointCount);
 
     // resize buffer if needed
-    if (points.geometry.attributes.position.count !== curvePoints.length) {
+    const desiredCount = curvePoints.length;
+    if (points.geometry.attributes.position.count !== desiredCount) {
       points.geometry.setAttribute(
         'position',
-        new THREE.BufferAttribute(new Float32Array(curvePoints.length * 3), 3)
+        new THREE.BufferAttribute(new Float32Array(desiredCount * 3), 3)
       );
     }
 
     const positions = points.geometry.attributes.position.array;
 
-    for (let j = 0; j < curvePoints.length; j++) {
+    for (let j = 0; j < desiredCount; j++) {
       const p = curvePoints[j];
       const idx = j * 3;
       positions[idx] = p.x;
@@ -161,4 +223,3 @@ function animate(time) {
 
   renderer.render(scene, camera);
 }
-
