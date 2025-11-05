@@ -1,9 +1,13 @@
+
+You said:
+
+ 
 import * as THREE from 'three';
 import { Noise } from 'noisejs';
 
 const noise = new Noise();
 
-let scene, camera, renderer, frameId;
+let scene, camera, renderer;
 const lines = [];
 let lineCount = 25;
 
@@ -33,17 +37,10 @@ function init() {
   renderer = new THREE.WebGLRenderer({
     canvas: document.getElementById('canvas'),
     antialias: true,
-    alpha: true,
-    // preserveDrawingBuffer: false, // default; keep it light
-    powerPreference: 'high-performance'
+    alpha: true
   });
-
-  // ⬇️ Clamp DPR to avoid massive buffers on iPad (rotation = freeze/crash)
-  setSafePixelRatio();
   renderer.setSize(width, height);
-
-  // Use supported flags
-  renderer.autoClear = true;
+  renderer.autoClearColor = false;
   renderer.setClearColor(0xffffff, 0.05);
 
   const material = new THREE.PointsMaterial({
@@ -68,28 +65,7 @@ function init() {
     scene.add(points);
   }
 
-  // Robust resize/orientation handling (iOS does multiple resizes)
-  window.addEventListener('resize', onWindowResize, { passive: true });
-  window.addEventListener('orientationchange', onWindowResize, { passive: true });
-
-  // Handle WebGL context loss on iPad Safari during rotation
-  renderer.domElement.addEventListener('webglcontextlost', (e) => {
-    e.preventDefault();
-    if (frameId) cancelAnimationFrame(frameId);
-  }, false);
-
-  renderer.domElement.addEventListener('webglcontextrestored', () => {
-    // Re-apply DPR/size and resume
-    setSafePixelRatio();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    animate();
-  }, false);
-}
-
-function setSafePixelRatio() {
-  // iPad Pros report DPR 2–3; cap to keep buffers sane
-  const maxDPR = 1.75;
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDPR));
+  window.addEventListener('resize', onWindowResize);
 }
 
 function createCircleTexture() {
@@ -108,35 +84,28 @@ function createCircleTexture() {
   return texture;
 }
 
-let resizeRAF = 0;
 function onWindowResize() {
-  // Debounce; let iOS finish reflow after rotation
-  if (resizeRAF) cancelAnimationFrame(resizeRAF);
-  resizeRAF = requestAnimationFrame(() => {
-    width = Math.max(1, window.innerWidth);
-    height = Math.max(1, window.innerHeight);
+  width = window.innerWidth;
+  height = window.innerHeight;
 
-    sharedLeftX = -width / 1.5;
-    sharedRightX = width / 1.5;
-    maxDist = width / 0.5;
+  sharedLeftX = -width / 1.5;
+  sharedRightX = width / 1.5;
+  maxDist = width / 0.5;
 
-    camera.left = -width / 2;
-    camera.right = width / 2;
-    camera.top = height / 2;
-    camera.bottom = -height / 2;
-    camera.updateProjectionMatrix();
+  camera.left = -width / 2;
+  camera.right = width / 2;
+  camera.top = height / 2;
+  camera.bottom = -height / 2;
+  camera.updateProjectionMatrix();
 
-    setSafePixelRatio();
-    renderer.setSize(width, height);
-  });
+  renderer.setSize(width, height);
 }
 
-function animate(time = 0) {
-  frameId = requestAnimationFrame(animate);
+function animate(time) {
+  requestAnimationFrame(animate);
   const t = time * 0.00032;
 
-  // Clear using supported API
-  renderer.clear();
+  renderer.clearColor();
 
   lines.forEach((points, lineIndex) => {
     const baseY = 0;
@@ -160,22 +129,21 @@ function animate(time = 0) {
 
     // calculate number of dots based on curve length and spacing
     const curveLength = curve.getLength();
-    const pointCount = Math.max(2, Math.floor(curveLength / dotSpacing));
+    const pointCount = Math.floor(curveLength / dotSpacing);
 
     const curvePoints = curve.getSpacedPoints(pointCount);
 
     // resize buffer if needed
-    const desired = curvePoints.length;
-    if (points.geometry.getAttribute('position').count !== desired) {
+    if (points.geometry.attributes.position.count !== curvePoints.length) {
       points.geometry.setAttribute(
         'position',
-        new THREE.BufferAttribute(new Float32Array(desired * 3), 3)
+        new THREE.BufferAttribute(new Float32Array(curvePoints.length * 3), 3)
       );
     }
 
     const positions = points.geometry.attributes.position.array;
 
-    for (let j = 0; j < desired; j++) {
+    for (let j = 0; j < curvePoints.length; j++) {
       const p = curvePoints[j];
       const idx = j * 3;
       positions[idx] = p.x;
