@@ -33,16 +33,12 @@ function init() {
   renderer = new THREE.WebGLRenderer({
     canvas: document.getElementById('canvas'),
     antialias: true,
-    // CHANGED: make canvas opaque to avoid iOS alpha + clear issues
-    alpha: false
+    alpha: true
   });
   renderer.setSize(width, height);
-  // CHANGED: clamp DPR for stability on iPad/retina
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  // CHANGED: use opaque clear (no semi-transparent background)
-  renderer.setClearColor(0xffffff, 1);
+  renderer.autoClearColor = false;
+  renderer.setClearColor(0xffffff, 0.05);
 
-  // CHANGED: NormalBlending so black points are visible (not additive black)
   const material = new THREE.PointsMaterial({
     color: 0x000000,
     size: 1.8,
@@ -52,7 +48,7 @@ function init() {
     map: createCircleTexture(),
     alphaTest: 0.1,
     depthWrite: false,
-    blending: THREE.NormalBlending
+    blending: THREE.AdditiveBlending
   });
 
   for (let i = 0; i < lineCount; i++) {
@@ -65,13 +61,7 @@ function init() {
     scene.add(points);
   }
 
-  // CHANGED: stable resize handler (immediate + next frame) for iPad rotation
-  const onWindowResizeStable = () => {
-    onWindowResize();
-    requestAnimationFrame(onWindowResize);
-  };
-  window.addEventListener('resize', onWindowResizeStable, { passive: true });
-  window.addEventListener('orientationchange', onWindowResizeStable, { passive: true });
+  window.addEventListener('resize', onWindowResize);
 }
 
 function createCircleTexture() {
@@ -80,7 +70,6 @@ function createCircleTexture() {
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext('2d');
 
-  // keep the same hard-edged dot (no visual change on desktop)
   ctx.beginPath();
   ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
   ctx.fillStyle = '#000000';
@@ -112,7 +101,7 @@ function animate(time) {
   requestAnimationFrame(animate);
   const t = time * 0.00032;
 
-  // REMOVED: renderer.clearColor(); (this call doesn't exist and caused issues)
+  renderer.clearColor();
 
   lines.forEach((points, lineIndex) => {
     const baseY = 0;
@@ -171,7 +160,7 @@ function animate(time) {
   renderer.render(scene, camera);
 }
 
-// tiny debounce helper (unused but kept)
+// tiny debounce helper (iOS fires many resize events)
 function debounce(fn, ms = 100) {
   let t;
   return (...args) => {
