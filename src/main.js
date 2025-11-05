@@ -1,6 +1,4 @@
 
-You said:
-
  
 import * as THREE from 'three';
 import { Noise } from 'noisejs';
@@ -163,3 +161,4 @@ function animate(time) {
 
   renderer.render(scene, camera);
 }
+
