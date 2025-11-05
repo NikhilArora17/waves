@@ -99,7 +99,7 @@ function start(foundCanvas) {
     map: createCircleTexture(),
     alphaTest: 0.1,
     depthWrite: false,
-    blending: THREE.AdditiveBlending
+    blending: THREE.NormalBlending 
   });
 
   // Lines
