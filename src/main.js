@@ -7,16 +7,17 @@ let scene, camera, renderer, canvas;
 const lines = [];
 let lineCount = 25;
 
-// Instead of segmentCount, we use dotSpacing
-let dotSpacing = 7; // gap between dots in px
+let dotSpacing = 7;
 
-// Track size & DPR safely
+// ---- NEW: keep one scale constant for endpoints
+const EDGE_SCALE = 1.3;
+
 let width = Math.max(1, window.innerWidth);
 let height = Math.max(1, window.innerHeight);
-let DPR = Math.min(window.devicePixelRatio || 1, 2); // clamp to keep iPad happy
+let DPR = Math.min(window.devicePixelRatio || 1, 2);
 
-let sharedLeftX = -width / 1.3;
-let sharedRightX = width / 1.3;
+let sharedLeftX = -width / EDGE_SCALE;
+let sharedRightX = width / EDGE_SCALE;
 let maxDist = width / 0.5;
 
 let contextLost = false;
@@ -37,7 +38,7 @@ function init() {
   );
   camera.position.z = 1;
 
-  buildRenderer(); // creates renderer & attaches context listeners
+  buildRenderer();
 
   const material = new THREE.PointsMaterial({
     color: 0x000000,
@@ -53,7 +54,7 @@ function init() {
 
   for (let i = 0; i < lineCount; i++) {
     const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(3); // placeholder; real size set each frame
+    const positions = new Float32Array(3);
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const points = new THREE.Points(geometry, material.clone());
     points.userData.index = i;
@@ -61,13 +62,13 @@ function init() {
     scene.add(points);
   }
 
-  // Resize/orientation handling
   window.addEventListener('resize', scheduleSafeResize, { passive: true });
   window.addEventListener('orientationchange', scheduleSafeResize, { passive: true });
-
-  // WebGL context loss handling (common on iPad rotate)
   canvas.addEventListener('webglcontextlost', onContextLost, false);
   canvas.addEventListener('webglcontextrestored', onContextRestored, false);
+
+  // initial CSS+buffer sync to ensure perfect centering
+  renderer.setSize(width, height, true);   // <-- ensure canvas CSS matches
 }
 
 function buildRenderer() {
@@ -78,31 +79,27 @@ function buildRenderer() {
     powerPreference: 'high-performance',
     preserveDrawingBuffer: false
   });
-
   renderer.setPixelRatio(DPR);
-  renderer.setSize(width, height, false);
-  renderer.setClearColor(0xffffff, 0.05); // subtle white backdrop
+  renderer.setSize(width, height, true);   // <-- ensure CSS size updates
+  renderer.setClearColor(0xffffff, 0.05);
   renderer.autoClear = true;
 }
 
 function recreateRenderer() {
-  // Dispose old renderer explicitly
   if (renderer) {
-    try { renderer.dispose(); } catch (_) {}
+    try { renderer.dispose(); } catch(_) {}
   }
   buildRenderer();
 }
 
 function onContextLost(ev) {
-  ev.preventDefault(); // allow restoration
+  ev.preventDefault();
   contextLost = true;
 }
 
 function onContextRestored() {
   contextLost = false;
   recreateRenderer();
-  // Mark any textures as dirty if you add more later
-  // (our circle texture is regenerated via material.clone at init)
 }
 
 function createCircleTexture() {
@@ -110,31 +107,23 @@ function createCircleTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = size;
   const ctx = c.getContext('2d');
-
   ctx.beginPath();
   ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
   ctx.fillStyle = '#000000';
   ctx.fill();
-
   const texture = new THREE.CanvasTexture(c);
   texture.needsUpdate = true;
   return texture;
 }
 
-// Debounced resize that waits for Safari to settle widths/heights/DPR
 function scheduleSafeResize() {
   if (resizeRaf) cancelAnimationFrame(resizeRaf);
-  // Wait a couple of frames for address bar/chrome animation to finish
-  let tries = 0;
-  const maxTries = 12; // ~200ms at 60fps
+  let tries = 0, maxTries = 12;
   let lastW = 0, lastH = 0, lastDpr = 0;
-
   const tick = () => {
     const w = Math.max(1, window.innerWidth);
     const h = Math.max(1, window.innerHeight);
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-
-    // If sizes/DPR are stable for two consecutive frames OR we timed out, apply resize
     if ((w === lastW && h === lastH && dpr === lastDpr) || tries >= maxTries) {
       applyResize(w, h, dpr);
     } else {
@@ -151,18 +140,19 @@ function applyResize(newW, newH, newDpr) {
   height = newH;
   DPR = newDpr;
 
-  sharedLeftX = -width / 1.5;
-  sharedRightX = width / 1.5;
+  // keep endpoints symmetric around X=0 using the SAME scale as init
+  sharedLeftX  = -width / EDGE_SCALE;
+  sharedRightX =  width / EDGE_SCALE;
   maxDist = width / 0.5;
 
   camera.left = -width / 2;
-  camera.right = width / 2;
-  camera.top = height / 2;
+  camera.right =  width / 2;
+  camera.top =   height / 2;
   camera.bottom = -height / 2;
   camera.updateProjectionMatrix();
 
   renderer.setPixelRatio(DPR);
-  renderer.setSize(width, height, false);
+  renderer.setSize(width, height, true); // <-- keep CSS + drawing buffer in sync
 }
 
 function animate(time) {
@@ -172,7 +162,7 @@ function animate(time) {
   const t = time * 0.00032;
 
   lines.forEach((points, lineIndex) => {
-    const baseY = 0;
+    const baseY = 0; // centered vertically
     const amplitude = 150 + lineIndex * 30;
 
     const phaseShift = lineIndex * 0.2;
@@ -191,13 +181,10 @@ function animate(time) {
 
     const curve = new THREE.CatmullRomCurve3([p0, ...midPoints, p4]);
 
-    // Calculate number of dots based on curve length and spacing
     const curveLength = Math.max(1, curve.getLength());
     const pointCount = Math.max(2, Math.floor(curveLength / dotSpacing));
-
     const curvePoints = curve.getSpacedPoints(pointCount);
 
-    // Resize buffer if needed
     const attr = points.geometry.getAttribute('position');
     if (!attr || attr.count !== curvePoints.length) {
       points.geometry.setAttribute(
@@ -207,7 +194,6 @@ function animate(time) {
     }
 
     const positions = points.geometry.attributes.position.array;
-
     for (let j = 0; j < curvePoints.length; j++) {
       const p = curvePoints[j];
       const idx = j * 3;
@@ -215,10 +201,8 @@ function animate(time) {
       positions[idx + 1] = p.y;
       positions[idx + 2] = 0;
     }
-
     points.geometry.attributes.position.needsUpdate = true;
 
-    // Fade by distance to center
     const centerIndex = Math.floor(curvePoints.length / 2);
     const cx = curvePoints[centerIndex]?.x ?? 0;
     const distToCenter = Math.abs(cx);
