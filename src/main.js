@@ -14,7 +14,7 @@ let width = window.innerWidth;
 let height = window.innerHeight;
 
 let sharedLeftX = -width / 1.3;
-let sharedRightX =  width / 1.3;
+let sharedRightX = width / 1.3;
 let maxDist = width / 0.5;
 
 init();
@@ -35,11 +35,7 @@ function init() {
     antialias: true,
     alpha: true
   });
-
-  // ✅ DPR clamp + size (prevents rotation freeze)
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(width, height, false);
-
+  renderer.setSize(width, height);
   renderer.autoClearColor = false;
   renderer.setClearColor(0xffffff, 0.05);
 
@@ -66,13 +62,6 @@ function init() {
   }
 
   window.addEventListener('resize', onWindowResize);
-
-  // ✅ iOS rotation: wait briefly for dimensions to settle
-  window.addEventListener(
-    'orientationchange',
-    () => setTimeout(() => { onWindowResize(); }, 180),
-    { passive: true }
-  );
 }
 
 function createCircleTexture() {
@@ -95,10 +84,9 @@ function onWindowResize() {
   width = window.innerWidth;
   height = window.innerHeight;
 
-  // ✅ keep math consistent with init (fixes off-center after rotate)
-  sharedLeftX  = -width / 1.3;
-  sharedRightX =  width / 1.3;
-  maxDist      =  width / 0.5;
+  sharedLeftX = -width / 1.5;
+  sharedRightX = width / 1.5;
+  maxDist = width / 0.5;
 
   camera.left = -width / 2;
   camera.right = width / 2;
@@ -106,16 +94,14 @@ function onWindowResize() {
   camera.bottom = -height / 2;
   camera.updateProjectionMatrix();
 
-  // ✅ DPR clamp + size on every resize
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(width, height, false);
+  renderer.setSize(width, height);
 }
 
-function animate(time = 0) {
+function animate(time) {
   requestAnimationFrame(animate);
   const t = time * 0.00032;
 
-  // ❌ DO NOT call renderer.clearColor(); (not a function)
+  //renderer.clearColor();
 
   lines.forEach((points, lineIndex) => {
     const baseY = 0;
@@ -137,9 +123,10 @@ function animate(time = 0) {
 
     const curve = new THREE.CatmullRomCurve3([p0, ...midPoints, p4]);
 
-    // ✅ guard against 0 points during rotation
+    // calculate number of dots based on curve length and spacing
     const curveLength = curve.getLength();
-    const pointCount = Math.max(2, Math.floor(curveLength / dotSpacing));
+    const pointCount = Math.floor(curveLength / dotSpacing);
+
     const curvePoints = curve.getSpacedPoints(pointCount);
 
     // resize buffer if needed
@@ -162,14 +149,10 @@ function animate(time = 0) {
 
     points.geometry.attributes.position.needsUpdate = true;
 
-    // ✅ safe fade when sampling center point
-    let fade = 1.0;
-    if (curvePoints.length > 0) {
-      const centerIndex = (curvePoints.length - 1) >> 1;
-      const cx = curvePoints[centerIndex].x;
-      const distToCenter = Math.abs(cx);
-      fade = 1.0 - Math.min(distToCenter / maxDist, 1);
-    }
+    const centerIndex = Math.floor(curvePoints.length / 2);
+    const cx = curvePoints[centerIndex].x;
+    const distToCenter = Math.abs(cx);
+    const fade = 1.0 - Math.min(distToCenter / maxDist, 1);
 
     points.material.opacity = 0.15 + 0.35 * Math.sin(t * 4 + lineIndex * 0.4) * fade;
   });
@@ -177,7 +160,7 @@ function animate(time = 0) {
   renderer.render(scene, camera);
 }
 
-// tiny debounce helper (iOS fires many resize events) — unused but kept if needed later
+// tiny debounce helper (iOS fires many resize events)
 function debounce(fn, ms = 100) {
   let t;
   return (...args) => {
