@@ -101,7 +101,7 @@ function animate(time) {
   requestAnimationFrame(animate);
   const t = time * 0.00032;
 
-  renderer.clearColor();
+  //renderer.clearColor();
 
   lines.forEach((points, lineIndex) => {
     const baseY = 0;
