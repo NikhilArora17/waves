@@ -14,7 +14,7 @@ let width = window.innerWidth;
 let height = window.innerHeight;
 
 let sharedLeftX = -width / 1.3;
-let sharedRightX =  width / 1.3;
+let sharedRightX = width / 1.3;
 let maxDist = width / 0.5;
 
 init();
@@ -35,11 +35,7 @@ function init() {
     antialias: true,
     alpha: true
   });
-
-  // ✅ DPR clamp + safe sizing (keeps buffers valid on iPad rotate)
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(width, height, false);
-
+  renderer.setSize(width, height);
   renderer.autoClearColor = false;
   renderer.setClearColor(0xffffff, 0.05);
 
@@ -65,18 +61,7 @@ function init() {
     scene.add(points);
   }
 
-  window.addEventListener('resize', onWindowResize, { passive: true });
-
-  // ✅ iOS rotation: wait briefly for dimensions to settle
-  window.addEventListener('orientationchange', () => {
-    setTimeout(onWindowResize, 180);
-  }, { passive: true });
-
-  // ✅ Extra stability: use visualViewport when available (debounced)
-  if (window.visualViewport) {
-    const vvDebounced = debounce(onWindowResize, 120);
-    window.visualViewport.addEventListener('resize', vvDebounced, { passive: true });
-  }
+  window.addEventListener('resize', onWindowResize);
 }
 
 function createCircleTexture() {
@@ -95,45 +80,28 @@ function createCircleTexture() {
   return texture;
 }
 
-// Prefer visualViewport during rotation; fallback to window
-function getViewportSize() {
-  const vw = (window.visualViewport && window.visualViewport.width)  || window.innerWidth  || 1;
-  const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight || 1;
-  return { vw: Math.floor(vw), vh: Math.floor(vh) };
-}
-
 function onWindowResize() {
-  // Read stable-ish size; skip tiny transient values on iOS during rotate
-  const { vw, vh } = getViewportSize();
-  if (vw < 320 || vh < 320) {
-    setTimeout(onWindowResize, 120);
-    return;
-  }
+  width = window.innerWidth;
+  height = window.innerHeight;
 
-  width = vw;
-  height = vh;
+  sharedLeftX = -width / 1.5;
+  sharedRightX = width / 1.5;
+  maxDist = width / 0.5;
 
-  // ✅ keep EXACT same ratios as init (so waves don't shift)
-  sharedLeftX  = -width / 1.3;
-  sharedRightX =  width / 1.3;
-  maxDist      =  width / 0.5;
-
-  camera.left   = -width / 2;
-  camera.right  =  width / 2;
-  camera.top    =  height / 2;
+  camera.left = -width / 2;
+  camera.right = width / 2;
+  camera.top = height / 2;
   camera.bottom = -height / 2;
   camera.updateProjectionMatrix();
 
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(width, height, false);
+  renderer.setSize(width, height);
 }
 
-function animate(time = 0) {
+function animate(time) {
   requestAnimationFrame(animate);
   const t = time * 0.00032;
 
-  // (kept as requested; you can remove this yourself later)
-  renderer.clearColor();
+  //renderer.clearColor();
 
   lines.forEach((points, lineIndex) => {
     const baseY = 0;
@@ -155,9 +123,10 @@ function animate(time = 0) {
 
     const curve = new THREE.CatmullRomCurve3([p0, ...midPoints, p4]);
 
-    // ✅ guard against 0 points during rotation blips
+    // calculate number of dots based on curve length and spacing
     const curveLength = curve.getLength();
-    const pointCount = Math.max(2, Math.floor(curveLength / dotSpacing));
+    const pointCount = Math.floor(curveLength / dotSpacing);
+
     const curvePoints = curve.getSpacedPoints(pointCount);
 
     // resize buffer if needed
@@ -169,23 +138,21 @@ function animate(time = 0) {
     }
 
     const positions = points.geometry.attributes.position.array;
+
     for (let j = 0; j < curvePoints.length; j++) {
       const p = curvePoints[j];
       const idx = j * 3;
-      positions[idx]     = p.x;
+      positions[idx] = p.x;
       positions[idx + 1] = p.y;
       positions[idx + 2] = 0;
     }
+
     points.geometry.attributes.position.needsUpdate = true;
 
-    // ✅ safe fade (no sampling when list is empty)
-    let fade = 1.0;
-    if (curvePoints.length > 0) {
-      const centerIndex = (curvePoints.length - 1) >> 1;
-      const cx = curvePoints[centerIndex].x;
-      const distToCenter = Math.abs(cx);
-      fade = 1.0 - Math.min(distToCenter / maxDist, 1);
-    }
+    const centerIndex = Math.floor(curvePoints.length / 2);
+    const cx = curvePoints[centerIndex].x;
+    const distToCenter = Math.abs(cx);
+    const fade = 1.0 - Math.min(distToCenter / maxDist, 1);
 
     points.material.opacity = 0.15 + 0.35 * Math.sin(t * 4 + lineIndex * 0.4) * fade;
   });
@@ -193,7 +160,7 @@ function animate(time = 0) {
   renderer.render(scene, camera);
 }
 
-// tiny debounce helper
+// tiny debounce helper (iOS fires many resize events)
 function debounce(fn, ms = 100) {
   let t;
   return (...args) => {
