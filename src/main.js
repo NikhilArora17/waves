@@ -17,8 +17,46 @@ let sharedLeftX = -width / 1.3;
 let sharedRightX =  width / 1.3;
 let maxDist = width / 0.5;
 
-init();
-animate();
+let animStarted = false;
+let resizeLock = false;
+
+stabilizeAndInit(); // <-- waits for stable size if needed
+
+function stabilizeAndInit() {
+  // On iOS (portrait at load), innerWidth/innerHeight can be tiny for a few ms.
+  // Wait until both are reasonable for 2 consecutive animation frames.
+  let lastW = 0, lastH = 0, stableFrames = 0;
+
+  function check() {
+    const w = window.innerWidth || 1;
+    const h = window.innerHeight || 1;
+
+    if (w >= 320 && h >= 320) {
+      if (w === lastW && h === lastH) stableFrames++;
+      else stableFrames = 0;
+      lastW = w; lastH = h;
+    } else {
+      stableFrames = 0;
+      lastW = w; lastH = h;
+    }
+
+    if (stableFrames >= 2) {
+      width = lastW;
+      height = lastH;
+      sharedLeftX  = -width / 1.3;
+      sharedRightX =  width / 1.3;
+      maxDist      =  width / 0.5;
+
+      init();
+      animate();
+      animStarted = true;
+    } else {
+      requestAnimationFrame(check);
+    }
+  }
+
+  requestAnimationFrame(check);
+}
 
 function init() {
   scene = new THREE.Scene();
@@ -35,8 +73,7 @@ function init() {
     antialias: true,
     alpha: true
   });
-  // keep original behaviour: update canvas CSS size too
-  renderer.setSize(width, height);
+  renderer.setSize(width, height); // keep original behavior
   renderer.autoClearColor = false;
   renderer.setClearColor(0xffffff, 0.05);
 
@@ -64,9 +101,13 @@ function init() {
 
   window.addEventListener('resize', onWindowResize, { passive: true });
 
-  // iOS rotation: wait for dimensions to settle, then resize
+  // iOS rotation: trigger a guarded resize after orientation changes
   window.addEventListener('orientationchange', () => {
-    setTimeout(onWindowResize, 180);
+    resizeLock = true;
+    setTimeout(() => {
+      resizeLock = false;
+      onWindowResize();
+    }, 180);
   }, { passive: true });
 }
 
@@ -86,13 +127,15 @@ function createCircleTexture() {
   return texture;
 }
 
+// Guarded resize: skip tiny/unstable sizes, retry once.
 function onWindowResize() {
-  // read the same metrics you used originally
+  if (!animStarted) return; // not initialized yet
+
   const w = window.innerWidth || 1;
   const h = window.innerHeight || 1;
 
-  // skip the transient tiny values iOS reports during rotate
-  if (w < 320 || h < 320) {
+  // If iOS is still reporting tiny values during rotate, retry shortly.
+  if (resizeLock || w < 320 || h < 320) {
     setTimeout(onWindowResize, 120);
     return;
   }
@@ -100,7 +143,7 @@ function onWindowResize() {
   width = w;
   height = h;
 
-  // keep EXACT same ratios as init so waves don't shift
+  // Keep EXACT same ratios as init so waves don't shift
   sharedLeftX  = -width / 1.3;
   sharedRightX =  width / 1.3;
   maxDist      =  width / 0.5;
@@ -111,16 +154,15 @@ function onWindowResize() {
   camera.bottom = -height / 2;
   camera.updateProjectionMatrix();
 
-  // keep original behaviour (updates CSS size too)
   renderer.setSize(width, height);
 }
 
-function animate(time) {
+function animate(time = 0) {
   requestAnimationFrame(animate);
   const t = time * 0.00032;
 
-  // (kept as you requested; you can remove yourself)
-  renderer.clearColor();
+  // You said you'll handle this; wrapped so it can't crash the loop.
+  try { renderer.clearColor(); } catch (e) {}
 
   lines.forEach((points, lineIndex) => {
     const baseY = 0;
@@ -136,13 +178,16 @@ function animate(time) {
     const midPoints = [];
     for (let j = 0; j < 3; j++) {
       let x = sharedLeftX + ((j + 1) / 4) * (sharedRightX - sharedLeftX) + horizontalJitter;
-      let y = baseY + verticalOffset + noise.perlin2(j * (0.4 + lineIndex * 0.05), t + lineIndex * 0.07) * amplitude;
+      let y = baseY + verticalOffset + noise.perlin2(
+        j * (0.4 + lineIndex * 0.05),
+        t + lineIndex * 0.07
+      ) * amplitude;
       midPoints.push(new THREE.Vector3(x, y, 0));
     }
 
     const curve = new THREE.CatmullRomCurve3([p0, ...midPoints, p4]);
 
-    // guard against 0 points during rotation blips
+    // Guard against 0 points during rotation blips
     const curveLength = curve.getLength();
     const pointCount = Math.max(2, Math.floor(curveLength / dotSpacing));
     const curvePoints = curve.getSpacedPoints(pointCount);
@@ -167,7 +212,7 @@ function animate(time) {
 
     points.geometry.attributes.position.needsUpdate = true;
 
-    // safe fade when sampling center point
+    // Safe fade (skip center sample if something odd happens)
     let fade = 1.0;
     if (curvePoints.length > 0) {
       const centerIndex = (curvePoints.length - 1) >> 1;
@@ -182,7 +227,7 @@ function animate(time) {
   renderer.render(scene, camera);
 }
 
-// tiny debounce helper (unused but kept)
+// tiny debounce helper (kept for possible future use)
 function debounce(fn, ms = 100) {
   let t;
   return (...args) => {
