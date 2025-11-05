@@ -1,3 +1,5 @@
+
+ 
 import * as THREE from 'three';
 import { Noise } from 'noisejs';
 
@@ -6,90 +8,38 @@ const noise = new Noise();
 let scene, camera, renderer;
 const lines = [];
 let lineCount = 25;
-let dotSpacing = 7;
 
-let width = 0, height = 0;
-let sharedLeftX = 0, sharedRightX = 0, maxDist = 0;
+// instead of segmentCount, we use dotSpacing
+let dotSpacing = 7; // gap between dots in px
 
-let resizeTimer = null;
-let lastAppliedW = -1, lastAppliedH = -1;
+let width = window.innerWidth;
+let height = window.innerHeight;
 
-const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-const DPR_CLAMP = isIOS ? 1.25 : 1.75;
+let sharedLeftX = -width / 1.3;
+let sharedRightX = width / 1.3;
+let maxDist = width / 0.5;
 
-// ---- DOM READY ----
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', start);
-} else {
-  start();
-}
+init();
+animate();
 
-function start() {
-  const canvas = document.getElementById('canvas');
-  if (!canvas) {
-    console.error('Canvas #canvas not found');
-    return;
-  }
-  init(canvas);
-  scheduleResize('init');
-  animate(0);
-}
-
-function getViewportSize() {
-  const vv = window.visualViewport;
-  if (vv) return { w: Math.floor(vv.width), h: Math.floor(vv.height) };
-  return { w: Math.floor(window.innerWidth), h: Math.floor(window.innerHeight) };
-}
-
-function scheduleResize(reason = 'generic') {
-  if (resizeTimer) clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => {
-    const { w, h } = getViewportSize();
-    if (!w || !h) { scheduleResize('retry'); return; }
-    if (w === lastAppliedW && h === lastAppliedH) return;
-    performResize(w, h);
-  }, reason === 'orientation' ? 250 : 120);
-}
-
-function performResize(newW, newH) {
-  lastAppliedW = width = newW;
-  lastAppliedH = height = newH;
-
-  sharedLeftX  = -width / 1.5;
-  sharedRightX =  width / 1.5;
-  maxDist      =  width / 0.5;
-
-  camera.left   = -width / 2;
-  camera.right  =  width / 2;
-  camera.top    =  height / 2;
-  camera.bottom = -height / 2;
-  camera.updateProjectionMatrix();
-
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DPR_CLAMP));
-  renderer.setSize(width, height, false);
-
-  // Precompute the worst-case point count for current width and update all line buffers once
-  const approxCount = Math.max(2, Math.ceil((sharedRightX - sharedLeftX) / dotSpacing) + 32);
-  lines.forEach(p => ensureBufferSize(p.geometry, approxCount));
-}
-
-function init(canvas) {
+function init() {
   scene = new THREE.Scene();
 
-  camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 1000);
+  camera = new THREE.OrthographicCamera(
+    -width / 2, width / 2,
+    height / 2, -height / 2,
+    1, 1000
+  );
   camera.position.z = 1;
 
   renderer = new THREE.WebGLRenderer({
-    canvas,
+    canvas: document.getElementById('canvas'),
     antialias: true,
-    alpha: true,
-    powerPreference: 'high-performance',
-    preserveDrawingBuffer: false
+    alpha: true
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DPR_CLAMP));
-  renderer.setSize(2, 2, false);
-  renderer.setClearColor(0xffffff, 1);
-  renderer.autoClear = true;
+  renderer.setSize(width, height);
+  renderer.autoClearColor = false;
+  renderer.setClearColor(0xffffff, 0.05);
 
   const material = new THREE.PointsMaterial({
     color: 0x000000,
@@ -98,73 +48,62 @@ function init(canvas) {
     transparent: true,
     opacity: 0.4,
     map: createCircleTexture(),
+    alphaTest: 0.1,
     depthWrite: false,
-    // alphaTest removed; iOS + additive + low opacity can look clipped
-    blending: THREE.NormalBlending
+    blending: THREE.AdditiveBlending
   });
 
-  // Pre-create line objects with a conservative buffer; will be grown on first resize
-  const initialPoints = 64;
   for (let i = 0; i < lineCount; i++) {
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(initialPoints * 3), 3));
-    geometry.setDrawRange(0, 0);
+    const positions = new Float32Array(3); // placeholder, real size set each frame
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const points = new THREE.Points(geometry, material.clone());
     points.userData.index = i;
     lines.push(points);
     scene.add(points);
   }
 
-  // Listeners (avoid observing canvas itself)
-  window.addEventListener('resize', () => scheduleResize('resize'));
-  window.addEventListener('orientationchange', () => scheduleResize('orientation'));
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', () => scheduleResize('vv'));
-  }
-
-  // Context loss safety on iOS
-  const gl = renderer.getContext();
-  canvas.addEventListener('webglcontextlost', (e) => {
-    e.preventDefault();
-    console.warn('WebGL context lost');
-  }, false);
-  canvas.addEventListener('webglcontextrestored', () => {
-    console.warn('WebGL context restored');
-    scheduleResize('restored');
-  }, false);
-}
-
-function ensureBufferSize(geometry, desiredCount) {
-  const attr = geometry.getAttribute('position');
-  if (!attr || attr.count < desiredCount) {
-    const nextSize = Math.max(desiredCount, attr ? attr.count * 2 : 128);
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(nextSize * 3), 3));
-  }
+  window.addEventListener('resize', onWindowResize);
 }
 
 function createCircleTexture() {
   const size = 64;
-  const cvs = document.createElement('canvas');
-  cvs.width = cvs.height = size;
-  const ctx = cvs.getContext('2d');
-  ctx.clearRect(0,0,size,size);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
   ctx.beginPath();
-  ctx.arc(size/2, size/2, size/2, 0, Math.PI*2);
-  ctx.fillStyle = '#000';
+  ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+  ctx.fillStyle = '#000000';
   ctx.fill();
-  const tex = new THREE.CanvasTexture(cvs);
-  tex.minFilter = THREE.LinearFilter; // safer on iOS
-  tex.magFilter = THREE.LinearFilter;
-  tex.generateMipmaps = false;
-  return tex;
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function onWindowResize() {
+  width = window.innerWidth;
+  height = window.innerHeight;
+
+  sharedLeftX = -width / 1.5;
+  sharedRightX = width / 1.5;
+  maxDist = width / 0.5;
+
+  camera.left = -width / 2;
+  camera.right = width / 2;
+  camera.top = height / 2;
+  camera.bottom = -height / 2;
+  camera.updateProjectionMatrix();
+
+  renderer.setSize(width, height);
 }
 
 function animate(time) {
   requestAnimationFrame(animate);
   const t = time * 0.00032;
 
-  const span = (sharedRightX - sharedLeftX);
-  const approxCount = Math.max(2, Math.floor(span / dotSpacing)); // cheap estimate
+  renderer.clearColor();
 
   lines.forEach((points, lineIndex) => {
     const baseY = 0;
@@ -177,36 +116,49 @@ function animate(time) {
     const p0 = new THREE.Vector3(sharedLeftX + horizontalJitter, baseY + verticalOffset, 0);
     const p4 = new THREE.Vector3(sharedRightX + horizontalJitter, baseY + verticalOffset, 0);
 
-    const mid = [];
+    const midPoints = [];
     for (let j = 0; j < 3; j++) {
-      const x = sharedLeftX + ((j + 1) / 4) * span + horizontalJitter;
-      const y = baseY + verticalOffset + noise.perlin2(j * (0.4 + lineIndex * 0.05), t + lineIndex * 0.07) * amplitude;
-      mid.push(new THREE.Vector3(x, y, 0));
+      let x = sharedLeftX + ((j + 1) / 4) * (sharedRightX - sharedLeftX) + horizontalJitter;
+      let y = baseY + verticalOffset + noise.perlin2(j * (0.4 + lineIndex * 0.05), t + lineIndex * 0.07) * amplitude;
+      midPoints.push(new THREE.Vector3(x, y, 0));
     }
 
-    const curve = new THREE.CatmullRomCurve3([p0, ...mid, p4]);
+    const curve = new THREE.CatmullRomCurve3([p0, ...midPoints, p4]);
 
-    // sample with fixed step (no getLength allocations)
+    // calculate number of dots based on curve length and spacing
+    const curveLength = curve.getLength();
+    const pointCount = Math.floor(curveLength / dotSpacing);
+
+    const curvePoints = curve.getSpacedPoints(pointCount);
+
+    // resize buffer if needed
+    if (points.geometry.attributes.position.count !== curvePoints.length) {
+      points.geometry.setAttribute(
+        'position',
+        new THREE.BufferAttribute(new Float32Array(curvePoints.length * 3), 3)
+      );
+    }
+
     const positions = points.geometry.attributes.position.array;
-    ensureBufferSize(points.geometry, approxCount);
-    let write = 0;
-    for (let k = 0; k < approxCount; k++) {
-      const u = k / (approxCount - 1);
-      const p = curve.getPoint(u);
-      positions[write++] = p.x;
-      positions[write++] = p.y;
-      positions[write++] = 0;
+
+    for (let j = 0; j < curvePoints.length; j++) {
+      const p = curvePoints[j];
+      const idx = j * 3;
+      positions[idx] = p.x;
+      positions[idx + 1] = p.y;
+      positions[idx + 2] = 0;
     }
 
     points.geometry.attributes.position.needsUpdate = true;
-    points.geometry.setDrawRange(0, approxCount);
 
-    // center fade
-    const cx = 0; // orthographic center x
-    const distToCenter = Math.abs((mid[1]?.x ?? 0) - cx);
+    const centerIndex = Math.floor(curvePoints.length / 2);
+    const cx = curvePoints[centerIndex].x;
+    const distToCenter = Math.abs(cx);
     const fade = 1.0 - Math.min(distToCenter / maxDist, 1);
-    points.material.opacity = 0.25 * fade; // simpler, stable on iOS
+
+    points.material.opacity = 0.15 + 0.35 * Math.sin(t * 4 + lineIndex * 0.4) * fade;
   });
 
   renderer.render(scene, camera);
 }
+
